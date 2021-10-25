@@ -622,7 +622,7 @@ def Performance(Init_DebtProfiles, RateStorages, A_SimObs, A_NGDP, Securities, C
     return Avg_IssRate, Avg_IRCost, Std_IRCost, Std_TotBal, Cor_IRC_PRI
 
 def MakeDbtPaths1(Init_DbtFVout, Init_AvgCoupRate, Init_TipsFVadj, Init_FrnsFV, IssuanceStrat, NomsPos,  TipsPos,  FrnsPos, NomsTenors, TipsTenors, FrnsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_SimObs, A_NGDP, A_NomsFV, A_TipsFV, A_TipsFVadj, A_TipsFVmax, A_TipsFVmaxOLD, A_FrnsFV, A_IRCost, A_TipsFVCost, A_DbtSvc, A_TotDfc, Avg_IssRate, A_TotCoup, Store_Pvals, TotDebt, WAM, M_Kernels=None, UnadjustedKernelIssuance=None, SumUnadjustedKernelIssuance=None,TrackWAM=False, Dynamic = False, QuartersperCoup=1): 
-    n_period = A_NomsRates.shape[0]                                                 # For clarity
+    n_period = A_NomsRates_view.shape[0]                                                 # For clarity
     A_NomsFV[:,:]    = xp.reshape(Init_DbtFVout[:,0],(-1,1))                      # Initial profile of Nominal debt outstanding face values
     A_TipsFV[:,:]    = xp.reshape(Init_DbtFVout[:,1],(-1,1))                      # Initial profile of TIPS debt outstanding face values, NOT INFLATION ADJUSTED
     A_TipsFVadj[:,:] = xp.reshape(Init_TipsFVadj    ,(-1,1))                      # Initial profile of TIPS debt outstanding face values, CPI INFLATION ADJUSTED
