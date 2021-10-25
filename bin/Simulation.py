@@ -589,7 +589,7 @@ def F_MakeDebtStorages(n_period,n_exp_horizon,n_simula): # Prepares the storage 
 def Performance(Init_DebtProfiles, RateStorages, A_SimObs, A_NGDP, Securities, Const_and_MEVs=None, M_Kernels=None, CoeffstoConst_and_MEVs=None, SingleIssuance = False, Static = False, Dynamic = False, QuartersperCoup=1):
     assert (SingleIssuance  + Static  + Dynamic == 1), "Set to True one and only one option: SingleIssuance, Stati, Dynamic"  
     n_securi = Securities.shape[1]
-    if SingleIssuance == True: N_strats = n_securi
+    if SingleIssuance == True: N_strats = n_securi; CoeffstoConst_and_MEVs_i = None
     else: N_strats = CoeffstoConst_and_MEVs.shape[2]
     Avg_IssRate = xp.zeros(N_strats, dtype= xp.float32)
     Avg_IRCost = xp.zeros(N_strats, dtype= xp.float32)
@@ -603,13 +603,15 @@ def Performance(Init_DebtProfiles, RateStorages, A_SimObs, A_NGDP, Securities, C
         if SingleIssuance == True:
             IssuanceStrat*=0; IssuanceStrat[:,i,:]=1
         elif Static == True:
-            IssuanceStrat[:,:,:] = xp.tile( xp.expand_dims(M_Kernels @ CoeffstoConst_and_MEVs[:,:,i], axis=0),  (n_period, 1, n_simula)   )
+            CoeffstoConst_and_MEVs_i = CoeffstoConst_and_MEVs[:,:,i]
+            IssuanceStrat[:,:,:] = xp.tile( xp.expand_dims(M_Kernels @ CoeffstoConst_and_MEVs_i, axis=0),  (n_period, 1, n_simula)   )
         elif Dynamic == True: #Dynamic: Kernels coefficients give dollars of issuance, not shares.  IssuanceStrat will be overwritten
-            UnadjustedKernelIssuance =   M_Kernels[:,1:]    @  (CoeffstoConst_and_MEVs[:,:,i] @ Const_and_MEVs) # Dollar Issuance caused by Kernelse else than Baseline   
+            CoeffstoConst_and_MEVs_i = CoeffstoConst_and_MEVs[:,:,i]
+            UnadjustedKernelIssuance =   M_Kernels[:,1:]    @  (CoeffstoConst_and_MEVs_i @ Const_and_MEVs) # Dollar Issuance caused by Kernelse else than Baseline   
             SumUnadjustedKernelIssuance = xp.sum(UnadjustedKernelIssuance, axis = 1) 
             #F_Kernels2Strategy(IssuanceStrat, Const_and_MEVs, M_Kernels, CoeffstoConst_and_MEVs[:,:,i], static = static)
         #MakeDbtPaths1(Init_DbtFVout, Init_AvgCoupRate, Init_TipsFVadj, Init_FrnsFV, IssuanceStrat, NomsPos,  TipsPos,  FrnsPos, NomsTenors, TipsTenors, FrnsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_SimObs, A_NGDP, *list(DebtStorages.values()), M_Kernels, UnadjustedKernelIssuance, SumUnadjustedKernelIssuance,TrackWAM=False, Dynamic = Dynamic, QuartersperCoup=QuartersperCoup )
-        MakeDbtPaths1(*Init_DebtProfiles, IssuanceStrat, *RateStorages, A_SimObs, A_NGDP, *list(DebtStorages.values()), M_Kernels, UnadjustedKernelIssuance, SumUnadjustedKernelIssuance,TrackWAM=False, Dynamic = Dynamic, QuartersperCoup=QuartersperCoup )
+        MakeDbtPaths1(*Init_DebtProfiles, IssuanceStrat, *RateStorages, A_SimObs, A_NGDP, *list(DebtStorages.values()), M_Kernels, CoeffstoConst_and_MEVs_i, UnadjustedKernelIssuance, SumUnadjustedKernelIssuance,TrackWAM=False, Dynamic = Dynamic, QuartersperCoup=QuartersperCoup )
         DebtStorages['A_IRCost'] /= A_NGDP
         DebtStorages['A_IRCost'] *= 400
         Axis = 1 #Select 1 to compute statistics across simulations for a fixed period, then average across periods. Select 0 to do the converse: compute stats across periods for a fixed simulation, then average across simulations. 
@@ -621,7 +623,7 @@ def Performance(Init_DebtProfiles, RateStorages, A_SimObs, A_NGDP, Securities, C
         Cor_IRC_PRI[i] = xp.mean(  xp.mean((DebtStorages['A_IRCost'][Startperiod:,:] - xp.mean(DebtStorages['A_IRCost'][Startperiod:,:], axis=Axis, keepdims=True))*(-A_SimObs[Startperiod:,6,:] - xp.mean(-A_SimObs[Startperiod:,6,:], axis=Axis, keepdims=True)), axis=Axis)/(xp.std(DebtStorages['A_IRCost'][Startperiod:,:], axis=Axis)*xp.std(-A_SimObs[Startperiod:,6,:], axis=Axis))  )
     return Avg_IssRate, Avg_IRCost, Std_IRCost, Std_TotBal, Cor_IRC_PRI
 
-def MakeDbtPaths1(Init_DbtFVout, Init_AvgCoupRate, Init_TipsFVadj, Init_FrnsFV, IssuanceStrat, NomsPos,  TipsPos,  FrnsPos, NomsTenors, TipsTenors, FrnsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_SimObs, A_NGDP, A_NomsFV, A_TipsFV, A_TipsFVadj, A_TipsFVmax, A_TipsFVmaxOLD, A_FrnsFV, A_IRCost, A_TipsFVCost, A_DbtSvc, A_TotDfc, Avg_IssRate, A_TotCoup, Store_Pvals, TotDebt, WAM, M_Kernels=None, UnadjustedKernelIssuance=None, SumUnadjustedKernelIssuance=None,TrackWAM=False, Dynamic = False, QuartersperCoup=1): 
+def MakeDbtPaths1(Init_DbtFVout, Init_AvgCoupRate, Init_TipsFVadj, Init_FrnsFV, IssuanceStrat, NomsPos,  TipsPos,  FrnsPos, NomsTenors, TipsTenors, FrnsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_SimObs, A_NGDP, A_NomsFV, A_TipsFV, A_TipsFVadj, A_TipsFVmax, A_TipsFVmaxOLD, A_FrnsFV, A_IRCost, A_TipsFVCost, A_DbtSvc, A_TotDfc, Avg_IssRate, A_TotCoup, Store_Pvals, TotDebt, WAM, M_Kernels=None, CoeffstoConst_and_MEVs=None, UnadjustedKernelIssuance=None, SumUnadjustedKernelIssuance=None,TrackWAM=False, Dynamic = False, QuartersperCoup=1): 
     n_period = A_NomsRates_view.shape[0]                                                 # For clarity
     A_NomsFV[:,:]    = xp.reshape(Init_DbtFVout[:,0],(-1,1))                      # Initial profile of Nominal debt outstanding face values
     A_TipsFV[:,:]    = xp.reshape(Init_DbtFVout[:,1],(-1,1))                      # Initial profile of TIPS debt outstanding face values, NOT INFLATION ADJUSTED
@@ -750,7 +752,7 @@ UnadjustedKernelIssuance =   M_Kernels[:,1:]    @  (CoeffstoConst_and_MEVs @ Con
 SumUnadjustedKernelIssuance = xp.sum(UnadjustedKernelIssuance, axis = 1) # Very small quantities, between -0.0000009 and + 0.0000008.
 n_securi = Securities.shape[1]
 IssuanceStrat = xp.zeros((n_period, n_securi, n_simula), dtype = xp.float32)
-MakeDbtPaths1(*Init_DebtProfiles, IssuanceStrat, *RateStorages, A_SimObs, A_NGDP, *list(DebtStorages.values()), M_Kernels, UnadjustedKernelIssuance, SumUnadjustedKernelIssuance,TrackWAM=True, Dynamic = True, QuartersperCoup=QuartersperCoup)
+MakeDbtPaths1(*Init_DebtProfiles, IssuanceStrat, *RateStorages, A_SimObs, A_NGDP, *list(DebtStorages.values()), M_Kernels, CoeffstoConst_and_MEVs, UnadjustedKernelIssuance, SumUnadjustedKernelIssuance,TrackWAM=True, Dynamic = True, QuartersperCoup=QuartersperCoup)
 if xp != np: X = IssuanceStrat[0,:,0].get(); XX = xp.mean(IssuanceStrat[79,:,:], axis=1).get()
 else: X = IssuanceStrat[0,:,0]; XX = xp.mean(IssuanceStrat[79,:,:], axis=1)
 row_names = ["Dynamic Issuance Strategy at Initial MEVs", "Mean Dynamic Issuance Strategy at long-run MEVs"]
