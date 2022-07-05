@@ -911,9 +911,9 @@ def MakeGDPPaths(Init_GDP, A_SimSta): # Notice that fixing initial price level a
     4) PCE is used to map RGDP to NGDP.
     """
     Init_RGDP = Init_GDP  #Just use our initial date as deflator start.
-    Init_Pot_RGDP = Init_RGDP / (1 + 2*A_SimSta[0,0,0]/400) # POTRGDP = RGDP / (1 + RGDPGAP%), where RGDPGAP=2 x Unemployment Gap by Okun Law. Take 0th simulation UGAP wlog since in period zero all simulations start at assumed initial state. 
+    Init_Pot_RGDP = Init_RGDP / (1 - 2*A_SimSta[0,0,0]/100) # POTRGDP = RGDP / (1 + RGDPGAP%), where RGDPGAP= - 2 x Unemployment Gap by Okun Law. Take 0th simulation UGAP wlog since in period zero all simulations start at assumed initial state. 
     A_Pot_RGDP = Init_Pot_RGDP * xp.cumprod(1+(A_SimSta[:,1,:])/400, axis=0)  # Potential RGDP quarterly growth is G state.
-    A_RGDP = A_Pot_RGDP * (1 + 2*A_SimSta[:,0,:]/400)                         # Apply Okun Law again to get RGDP paths
+    A_RGDP = A_Pot_RGDP * (1 - 2*A_SimSta[:,0,:]/100)                         # Apply Okun Law again to get RGDP paths
     A_NGDP = A_RGDP * xp.cumprod(1+(A_SimSta[:,3,:])/400, axis=0)             # Multiply by cumulative inflation to get nominal GDP
     return A_NGDP
 
