@@ -18,13 +18,18 @@ def F_Settings_to_Belton(D_Setup):
         D_Setup["start_year"] = 2017
         D_Setup["start_quarter"] = 4
         D_Setup["Securities"]= np.array([[0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 ],  # 1st row specifying security type (Nom=0, TIPS=1, FRN=2),
-                                         [1 , 2 , 3 , 5 , 7 , 10, 20, 30, 50]]) # 2nd row specifying tenor, in years (from 0.25 to n_exp_horizon//4, always multiples of 0.25)
-        D_Setup["Kernel1_Baseline"] = xp.reshape(xp.array([0.475,  0.11,  0.09, 0.115, 0.08 , 0.085,   0.0, 0.045,    0.0], dtype= xp.float32), (-1,1))
-        D_Setup["Kernel2_Bills"]    = xp.reshape(xp.array([ 1.00, -0.21, -0.17, -0.22, -0.16, -0.15,   0.0, -0.09,    0.0], dtype= xp.float32), (-1,1)) #Into Bills
-        D_Setup["Kernel3_Belly"]    = xp.reshape(xp.array([-0.25,  0.25,  1.00,  0.50, -0.50, -0.75,   0.0, -0.25,    0.0], dtype= xp.float32), (-1,1)) #Into Belly
-        D_Setup["Kernel4_Bonds"]    = xp.reshape(xp.array([ 0.00, -0.41, -0.33, -0.41, -0.10,  0.25,   0.0,  1.00,    0.0], dtype= xp.float32), (-1,1)) #Into Bonds
+                                         [1 , 2 , 3 , 5 , 7 , 10, 20, 30, 50]]) # 2nd row specifying tenor, in years (from 0.25 to 50)
+        D_Setup["Kernel1_Baseline"]= xp.reshape(xp.array([0.475, 0.11, 0.09,0.115, 0.08 , 0.085,0.0,0.045,0.0], dtype=xp.float32), (-1,1))
+        D_Setup["Kernel2_Bills"]   = xp.reshape(xp.array([ 1.00,-0.21,-0.17,-0.22, -0.16, -0.15,0.0,-0.09,0.0], dtype=xp.float32), (-1,1))
+        D_Setup["Kernel3_Belly"]   = xp.reshape(xp.array([-0.25, 0.25, 1.00, 0.50, -0.50, -0.75,0.0,-0.25,0.0], dtype=xp.float32), (-1,1))
+        D_Setup["Kernel4_Bonds"]   = xp.reshape(xp.array([ 0.00,-0.41,-0.33,-0.41, -0.10,  0.25,0.0, 1.00,0.0], dtype=xp.float32), (-1,1))
+        D_Setup["L_KernelNames"]    = ["Kernel2_Bills","Kernel3_Belly","Kernel4_Bonds"]
+        D_Setup["L_KernelBounds"]   = [[-0.4,0.5],[-0.08,0.1],[0.00,0.25]]  
+        D_Setup["CoeffstoConst_and_MEVs"] =  xp.array([[-279.4 , 255.2, 418.1, -0.6],  # (Non normalized) betas of K2 to Constant and MEVs
+                                                       [   70.6,  -6.2,  70.3,  0.3],  # (Non normalized) betas of K3 to Constant and MEVs
+                                                       [  -42.3,  25.0,  -5.9, -0.1]], dtype= xp.float32) # (Non normalized) betas of K5 
         D_Setup["CBO_weight"] = 1.0
-        D_Setup["CBO_projection"] = xp.array([ -2.45], dtype= xp.float32) # Belton et al primary deficit in initial periods is constantat at 2.45%.
+        D_Setup["CBO_projection"] = xp.array([ -2.45], dtype= xp.float32) # Belton et al pri. deficit in initial qtrs is const. at 2.45%.
         D_Setup["No_TIPS_FRN"] = False
         D_Setup["n_period"] = 80
         D_Setup["n_simula"] = 2000
@@ -1312,16 +1317,21 @@ def F_StaticOptim(Init_DebtProfiles,
          A_NGDP, 
          D_Setup,
          M_Kernels,
-         bnds = ((-2, 2), (-2, 2), (-2,2)), 
+         bnds = "default", 
          RA_low=0.0, RA_hig=5, RA_num=11, 
          Risk="Std_IRCost"): 
     
-    cons = ({'type': 'ineq', 'fun': lambda x:  x[0] - bnds[0][0]},
-            {'type': 'ineq', 'fun': lambda x: -x[0] + bnds[0][1]},
-            {'type': 'ineq', 'fun': lambda x:  x[1] - bnds[1][0]},
-            {'type': 'ineq', 'fun': lambda x: -x[1] + bnds[1][1]},
-            {'type': 'ineq', 'fun': lambda x:  x[2] - bnds[2][0]},
-            {'type': 'ineq', 'fun': lambda x: -x[2] + bnds[2][1]})
+    if bnds == "default":
+        bnds = [[-2, 2] for x in range(len(D_Setup["L_KernelNames"]))]
+    #cons = ({'type': 'ineq', 'fun': lambda x:  x[0] - bnds[0][0]},
+    #        {'type': 'ineq', 'fun': lambda x: -x[0] + bnds[0][1]},
+    #        {'type': 'ineq', 'fun': lambda x:  x[1] - bnds[1][0]},
+    #        {'type': 'ineq', 'fun': lambda x: -x[1] + bnds[1][1]},
+    #        {'type': 'ineq', 'fun': lambda x:  x[2] - bnds[2][0]},
+    #        {'type': 'ineq', 'fun': lambda x: -x[2] + bnds[2][1]})
+    cons = ()
+    for k in range(len(D_Setup["L_KernelNames"])):
+        cons += ({'type': 'ineq', 'fun': lambda x:  x[k] - bnds[k][0]}, {'type': 'ineq', 'fun': lambda x: -x[k] + bnds[k][1]},)
 
     Dict = globals()
     Dict["M_Kernels"] = M_Kernels
@@ -1343,7 +1353,7 @@ def F_StaticOptim(Init_DebtProfiles,
     Cor_IRC_PRIZ= xp.zeros(RA_num, dtype=xp.float32)
 
     for i in trange(RA_num):  
-        res = opt.minimize(F_Loss, [0,0,0.01], args=(M_Kernels, Risk_Aversion[i],
+        res = opt.minimize(F_Loss, [0.0 for x in range(len(D_Setup["L_KernelNames"]))], args=(M_Kernels, Risk_Aversion[i],
         Avg_IssRateZ[i:i+1],
         Avg_IRCostZ[i:i+1],
         Std_IRCostZ[i:i+1], 
