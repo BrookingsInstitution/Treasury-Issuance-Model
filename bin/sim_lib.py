@@ -358,9 +358,9 @@ def Extrap_TP0_TP2_2(A_Storage, TP02series_q):
     Term premia are added to the passed stored rates for the corresponding tenors.
     """
 
-    for qtr in [0,1,2,3,4,5,6,7]:  # Add term premium for first eight quarters: from +0qtrs (now), to +7qtr (1yr 2qtrs).
+    for qtr in [4,5,6,7]:  # Add term premium for first eight quarters: from +0qtrs (now), to +7qtr (1yr 2qtrs).
         # TP linearly increases in qtrs +4,...,+7 from 0 towards TP2(value at +8 qtrs)
-        A_Storage[:, qtr, :] += xp.squeeze(TP02series_q) * qtr / 8
+        A_Storage[:, qtr, :] += xp.squeeze(TP02series_q) * (qtr-4) / 4
 
 #D
 def Interp_TP2_TP10_2(A_Storage, TP02series_q, TP10series_q, Coeff_q):
