@@ -837,10 +837,10 @@ def F_InitiProfilesMSPD(
             MKTSEC  = MKTSEC[MKTSEC['MNTSTOMAT'] > -1] # Drop Matured Securities (there are very few, namely 9)
 
             # Compute outstanding amounts by different types of securities. 
-            MKTSEC['OUT_TIPS'] = MKTSEC['Outstanding Amount (in Millions)'] * MKTSEC['Security Class 1 Description'].isin(['Inflation-Protected Securities','Inflation-Indexed Notes', 'Inflation-Indexed Bonds'])
+            MKTSEC['OUT_TIPSadj'] = MKTSEC['Outstanding Amount (in Millions)'] * MKTSEC['Security Class 1 Description'].isin(['Inflation-Protected Securities','Inflation-Indexed Notes', 'Inflation-Indexed Bonds'])
             MKTSEC['OUT_Nomi'] = MKTSEC['Outstanding Amount (in Millions)'] * MKTSEC['Security Class 1 Description'].isin(['Bills Maturity Value', 'Notes', 'Bonds'])
             MKTSEC['OUT_FRNs'] = MKTSEC['Outstanding Amount (in Millions)'] * MKTSEC['Security Class 1 Description'].isin(['Floating Rate Notes'])
-            MKTSEC['OUT_TIPSadj'] = MKTSEC['OUT_TIPS'] + MKTSEC['Amount Adjusted for Inflation (in Millions)'].fillna(0) * MKTSEC['Security Class 1 Description'].isin(['Inflation-Protected Securities','Inflation-Indexed Notes', 'Inflation-Indexed Bonds'])
+            MKTSEC['OUT_TIPS'] = MKTSEC['OUT_TIPSadj'] - MKTSEC['Amount Adjusted for Inflation (in Millions)'].fillna(0) * MKTSEC['Security Class 1 Description'].isin(['Inflation-Protected Securities','Inflation-Indexed Notes', 'Inflation-Indexed Bonds'])
 
             #Search for securities where we do not know the coupon rate (all are Bills and Floating rate Notes), use yield to maturity.  
             MissingCoupRATE = MKTSEC['Interest Rate'].isna() 
