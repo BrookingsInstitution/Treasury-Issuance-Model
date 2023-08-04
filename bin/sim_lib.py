@@ -38,7 +38,6 @@ def F_Settings_to_Belton(D_Setup):
         D_Setup["use_convadj"] = True
         D_Setup["replicateBeltonTP"] = True
         D_Setup["ELB"] = 0.125
-        D_Setup["QuartersperCoup"] = 1
         D_Setup["estimate_not_assume"] = True
         D_Setup["Supply_Effects"] = True
         D_Setup["L_ParNam"] =         ['rhoU1','betaUR','rhoU2','rhoZ1','betaPU','rhoP1','rhoP2','betaFTay','rhoF1','rhoEpsCPI','rhoEpsPRI','rhoEpsTP10','rhoEpsTP2','alphaZ','betaPPE2pct', 'sigmaU',  'sigmaG',  'sigmaZ' , 'sigmaP',  'sigmaNuCPI',  'sigmaNuPRI',  'sigmaNuTP10',  'sigmaNuTP2','ATP10', 'ATP2','alphaPRI', 'betaTP10U', 'BTP2U','betaTP10TP2','betaPRIU']
@@ -1014,7 +1013,7 @@ def MakeDbtPaths1(
     SumUnadjustedKernelIssuance=None,
     TrackWAM=False, 
     Dynamic = False, 
-    QuartersperCoup=1,
+    QuartersperCoup=2,  #Set to semiannual coupons by default. 
     n_exp_horizon=201,
     ELB=.125,
     verbose=True): 
@@ -1115,7 +1114,7 @@ def Performance(
     SingleIssuance = False, 
     Static = False,
     Dynamic = False, 
-    QuartersperCoup=1,
+    QuartersperCoup=2,
     n_period = 80,
     n_exp_horizon = 201,
     n_simula = 2000,
@@ -1293,7 +1292,7 @@ def F_Loss(Weights_K2_K4,
         M_Kernels=M_Kernels, 
         CoeffstoConst_and_MEVs=CoeffstoConst, 
         Static=True, 
-        QuartersperCoup=D_Setup["QuartersperCoup"],
+        QuartersperCoup= 2,
         n_period=D_Setup["n_period"],
         n_exp_horizon=D_Setup["n_exp_horizon"],
         n_simula=D_Setup["n_simula"],
