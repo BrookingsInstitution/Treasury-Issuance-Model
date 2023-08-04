@@ -239,9 +239,9 @@ def MakeFFPaths3(A_SimSta, ModelMats, A_FFPaths, A_CPIPaths, n_exp_horizon=201, 
         A_SimStaCut = xp.matmul(M_Transi, A_SimStaCut, out=A_SimStaCut) # Transition Equation #1) Matrix multiplication in place. 
         A_SimStaCut += A_ConSta                                                    #2) Addition in place 
         xp.clip(A_SimStaCut[:,4,:], ELB, None, out = A_SimStaCut[:,4,:])           #3) Effective Lower Bound at 12.5 bps annualized rate
-        A_FFPaths[:,t,:] = (A_FFPaths[:, t-1 ,:]*(t-1) + A_SimStaCut[:,4,:])/t     # Directly compute average FFrate till horizon
+        A_FFPaths[:,t,:] = (A_FFPaths[:, t-1 ,:]*t + A_SimStaCut[:,4,:])/(t+1)     # Directly compute average FFrate till horizon
         if t < 30*4+1: #Keep CPI array smaller (5y and 10y tenors only needed for TIPS's IRP, tenors out to 30y needed for FRNs)
-            A_CPIPaths[:,t,:]=(A_CPIPaths[:,t-1,:]*(t-1) + A_SimStaCut[:,3,:]+A_SimStaCut[:,10,:])/t   # Same for average CPI
+            A_CPIPaths[:,t,:]=(A_CPIPaths[:,t-1,:]*t + A_SimStaCut[:,3,:]+A_SimStaCut[:,10,:])/(t+1)   # Same for average CPI
 
 def F_addFRP(Storage):
     """
