@@ -17,7 +17,7 @@ def F_Settings_to_Belton(D_Setup):
     if D_Setup["ReplicateBelton"]== True:
         D_Setup["start_year"] = 2017
         D_Setup["start_quarter"] = 4
-        D_Setup["Securities"]= np.array([[0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 ],  # 1st row specifying security type (Nom=0, TIPS=1, FRN=2),
+        D_Setup["Securities"]= np.array([[0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0 ],  # 1st row specifying security type (Nom=0, TIPS=1, FRN=2, ZCB=3),
                                          [1 , 2 , 3 , 5 , 7 , 10, 20, 30, 50]]) # 2nd row specifying tenor, in years (from 0.25 to 50)
         D_Setup["Kernel1_Baseline"]= xp.reshape(xp.array([0.475, 0.11, 0.09,0.115, 0.08 , 0.085,0.0,0.045,0.0], dtype=xp.float32), (-1,1))
         D_Setup["Kernel2_Bills"]   = xp.reshape(xp.array([ 1.00,-0.21,-0.17,-0.22, -0.16, -0.15,0.0,-0.09,0.0], dtype=xp.float32), (-1,1))
@@ -603,6 +603,17 @@ def F_MakeIRP(A_ExpFFR_05_10, A_SimSta, A_CPIPaths, plot_IRPcoeff=True, plot_IRP
     
     return Store_IRP
 
+def MakeCompRate(A_ZeroRates):
+    """
+    Converts an array of Zero rates into inverse discount factors - 1.(in place!)
+    """
+    A_ZeroRates[:, :, ...] /= 400
+    A_ZeroRates[:, :, ...] += 1
+    A_ZeroRates[:, 1:, ...] **= xp.reshape(xp.arange(1, A_ZeroRates.shape[1], dtype=xp.float32), tuple([1, -1] + [1 for x in range(A_ZeroRates.ndim - 2)]))  # Invert ZCB discount factors to get ZCB rates.
+    A_ZeroRates[:, :, ...] -= 1 #Notice we are not scaling this one back by *400.    
+    
+
+
 # Overall wrapper for rates block
 # Wrapper for memory management, does entire rates block and overwrites intermediate results (Fed Fund rates, TPremia, ZCB rates) and only returns rates on Coupon Bonds issued at par. Averages of intermediate results can be shown setting plot_rates=True
 
@@ -651,19 +662,23 @@ def F_SimRat(A_SimSta, A_SimObs, ModelMats,
     A_StoreIRP *= -1                      # Flip sign:                  Store  =    - IRP
     A_StoreIRP += A_Storage[:,:30*4+1,:]  # Add nominal yields:         Store =  (ExpNom + TP) - IRP
     A_StoreIRP -= A_CPIPaths[:,:30*4+1,:] # Subtract exp. inflation...  Store =   ExpNom - ExpINF + TP - IRP
-    F_addLRP(A_StoreIRP)                  # ... and Add LRP to get TIPS yield:
+    F_addLRP(A_StoreIRP)                  # ... and Add LRP to get TIPS yields!
     # Store = ExpNom - ExpInf + TP - IRP + LRP  = (ExpNom-ExpINF) + (TP - IRP - FRP ) + FRP + LRP =  R + RRP + FRP + LRP = TIPS 
     if plot_rates==True :
-        F_PlotRates2(M_avgFFPaths[:,:30*4+1]-xp.mean(A_CPIPaths[:,:30*4+1,:], axis=2), xp.mean(A_StoreIRP, axis=2), Ratestitle = "Tips ZCB Rates", avgPathtitle = "Avg Exp. (Fed Funds - CPI Infl)")
+        F_PlotRates2(M_avgFFPaths[:,:30*4+1]-xp.mean(A_CPIPaths[:,:30*4+1,:], axis=2), xp.mean(A_StoreIRP, axis=2), Ratestitle = "Tips ZCB Rates", avgPathtitle = "Avg Exp. (Fed Funds - CPI Infl)") 
     # Transform Zero Rates to Par rates
     MakeCoupRates(A_Storage)
     MakeCoupRates(A_StoreIRP)    
     A_Storage[:, 0:5, :] -= 0.08  # Adjust par rates for Bill-FFR basis, 8bps in Belton et al. 
     MakeOnTheRun(A_Storage)       # Adjust par rates for on-the run / off-the-run    
+    A_ZcbsRates  =  xp.copy(A_Storage[:, 0:5, :])  # (1): make a hard copy of On-the-Run par rates up to 4 quarters ahead. (this copy will be needed as pre-allocated space) 
+    MakeZCBRates(A_ZcbsRates)                      # (2): convert them back to Zero Rates.
+    A_ZcbsCompRt  =  xp.copy(A_Storage[:, 0:5, :])  # (3): make a hard copy of Zero rates. (this copy will be needed as pre-allocated space)
+    MakeCompRate(A_ZcbsCompRt)                      # (4): Compute Compound rate = (1+ZCBrate/400)^t - 1
     if plot_rates==True :
         F_PlotRates2(M_avgFFPaths, xp.mean(A_Storage, axis=2), Ratestitle = "Noms Par Rates", avgPathtitle = "Avg Exp. Fed Funds")
         F_PlotRates2(M_avgFFPaths[:,:30*4+1]-xp.mean(A_CPIPaths[:,:30*4+1,:], axis=2), xp.mean(A_StoreIRP, axis=2), Ratestitle = "Tips Par Rates", avgPathtitle = "Avg Exp. (Fed Funds - CPI Infl)")    
-    return A_Storage, A_StoreIRP, A_FRNRates 
+    return A_Storage, A_StoreIRP, A_FRNRates, A_ZcbsRates, A_ZcbsCompRt # Returned results are nominal par coupon rates, tips par coupon rates, FRN rates, and Bills zcb rates, and Bills zcb rates expressed as inverse disc. factors.
 
 
 # Supply effects
@@ -934,10 +949,12 @@ def F_MakeDebtStorages(n_period,n_exp_horizon,n_simula): # Prepares the storage 
     A_TipsFVadj  = xp.copy(A_NomsFV)                                            # Tracks profiles of inflation-adjusted FVs for TIPS. Shape n_exp_horizon x n_simula
     A_TipsFVmax  = xp.copy(A_NomsFV)                                            
     A_TipsFVmaxOLD = xp.copy(A_NomsFV) 
-    A_FrnsFV     = xp.copy(A_NomsFV)                                            # Tracks profiles of FVs for FRNS.      Shape n_exp_horizon x n_simula                                         
+    A_FrnsFV     = xp.copy(A_NomsFV)                                            # Tracks profiles of FVs for FRNS.      Shape n_exp_horizon x n_simula  
+    A_ZcbsPV     = xp.copy(A_NomsFV)                                            # Tracks profiles of PVs for Bills treated as ZCBs, 
+    A_ZcbsInt    = xp.copy(A_NomsFV)                                            # Tracks profiles of Interest Payments for ZCBs, Shape 5 x n_simula.
     A_IRCost     = xp.zeros((n_period,n_simula), dtype=xp.float32)              # Tracks interest cost from coupons generating cash flows. Shape n_period x n_simula
     A_TipsFVCost = xp.copy(A_IRCost)                                            # Tracks interest cost that TIPS accrue (without cash flow) at time t as inflation/deflation of their principal. Shape n_period x n_simula
-    A_DbtSvc     = xp.copy(A_IRCost)                                            # Tracks debt service cost, sum of coupon cost and maturing face values (for tips, maturing is max(FV, adjFV)).  Shape n_period x n_simula
+    A_DbtSvc     = xp.copy(A_IRCost)                                            # Tracks debt service cost, sum of coupon cost and maturing face values (for tips, maturing is max(FV, adjFV)). (for ZCB bills, FV=PV+IntCost)  Shape n_period x n_simula
     A_TotDfc     = xp.copy(A_IRCost)                                            # Tracks financing need, sum of debt service cost (above) plus primary deficit. Shape n_period x n_simula
     Avg_IssRate  = xp.zeros(n_period, dtype=xp.float32)                         # Tracks average issuance coupon rate. Shape n_period
     A_TotCoup    = xp.zeros((n_exp_horizon,2,n_simula), dtype=xp.float32)       # Tracks total coupons at every tenor from Nominals and Inflation-adjsuted coupons from tips.  Shape n_exp_horizon x 2 x n_simula
@@ -948,19 +965,21 @@ def F_MakeDebtStorages(n_period,n_exp_horizon,n_simula): # Prepares the storage 
     del n_period,n_exp_horizon,n_simula
     return locals().copy()
 
-def F_MakeRateStorages(Securities, A_NomsRates, A_TipsRates, A_FrnsRates):
-    NomsWhere,  TipsWhere,  FrnsWhere =  [  Securities[0,:]==x  for x in [0,1,2]][:]
-    NomsTenors, TipsTenors, FrnsTenors = [4*Securities[1,x].astype(np.int32) for x in [NomsWhere,TipsWhere,FrnsWhere]][:]
-    NomsPos,       TipsPos,    FrnsPos = [np.arange(len(x))[x] for x in [NomsWhere,  TipsWhere,  FrnsWhere]][:]
+def F_MakeRateStorages(Securities, A_NomsRates, A_TipsRates, A_FrnsRates, A_ZcbsRates, A_ZcbsCompRt):
+    NomsWhere,  TipsWhere,  FrnsWhere,  ZcbsWhere  = [  Securities[0,:]==x  for x in [0,1,2,3]][:]
+    NomsTenors,TipsTenors,FrnsTenors,ZcbsTenors= [4*Securities[1,x].astype(np.int32) for x in [NomsWhere,TipsWhere,FrnsWhere,ZcbsWhere]][:]
+    NomsPos,       TipsPos,    FrnsPos, ZcbsPos = [np.arange(len(x))[x] for x in [NomsWhere,  TipsWhere,  FrnsWhere, ZcbsWhere]][:]
     MaxFrnsTen = np.max(np.append(FrnsTenors,-1))
-    A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view = A_NomsRates[:,NomsTenors,:], A_TipsRates[:,TipsTenors,:], A_FrnsRates[:,:MaxFrnsTen+1,:] #Prepare views in advance.
-    TYE_ratio_Noms = A_NomsRates[0, :, :]*0
-    TYE_ratio_Tips = A_TipsRates[0, :, :]*0
-    A_NomsSupEf = A_NomsRates[0, :, :]*0
+    A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_ZcbsRates_view, A_ZcbsCompRt_view = A_NomsRates[:,NomsTenors,:], A_TipsRates[:,TipsTenors,:], A_FrnsRates[:,:MaxFrnsTen+1,:], A_ZcbsRates[:,ZcbsTenors,:], A_ZcbsCompRt[:,ZcbsTenors,:] #Prepare views in advance, as slices of existing arrays. Note: no memory use
+    TYE_ratio_Noms =   A_NomsRates[0, :, :]*0
+    TYE_ratio_Tips =   A_TipsRates[0, :, :]*0
+    A_NomsSupEf =      A_NomsRates[0, :, :]*0
     A_NomsSupEf_view = A_NomsSupEf[NomsTenors,:]    
-    A_TipsSupEf = A_TipsRates[0, :, :]*0
+    A_TipsSupEf =      A_TipsRates[0, :, :]*0
     A_TipsSupEf_view = A_TipsSupEf[TipsTenors,:] 
-    return NomsPos,  TipsPos,  FrnsPos, NomsTenors, TipsTenors, FrnsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, TYE_ratio_Noms, TYE_ratio_Tips, A_NomsSupEf, A_NomsSupEf_view, A_TipsSupEf, A_TipsSupEf_view, A_NomsRates, A_TipsRates
+    A_ZcbsSupEf =      A_ZcbsRates[0, :, :]*0
+    A_ZcbsSupEf_view = A_ZcbsSupEf[ZcbsTenors,:] 
+    return NomsPos,  TipsPos,  FrnsPos, ZcbsPos, NomsTenors, TipsTenors, FrnsTenors, ZcbsTenors, MaxFrnsTen, A_NomsRates_view, A_TipsRates_view, A_FrnsRates_view, A_ZcbsRates_view, A_ZcbsCompRt_view, TYE_ratio_Noms, TYE_ratio_Tips, A_NomsSupEf, A_NomsSupEf_view, A_TipsSupEf, A_TipsSupEf_view, A_ZcbsSupEf, A_ZcbsSupEf_view, A_NomsRates, A_TipsRates, A_ZcbsRates
 
 def MakeDbtPaths1(
     Init_DbtFVout,
@@ -971,21 +990,28 @@ def MakeDbtPaths1(
     NomsPos,
     TipsPos,
     FrnsPos,
+    ZcbsPos,
     NomsTenors,
     TipsTenors,
     FrnsTenors,
+    ZcbsTenors,
     MaxFrnsTen,
     A_NomsRates_view,
     A_TipsRates_view,
     A_FrnsRates_view,
+    A_ZcbsRates_view,
+    A_ZcbsCompRt_view,
     TYE_ratio_Noms,
     TYE_ratio_Tips,
     A_NomsSupEf,
     A_NomsSupEf_view,
     A_TipsSupEf,
     A_TipsSupEf_view,
+    A_ZcbsSupEf,
+    A_ZcbsSupEf_view,
     A_NomsRates,
     A_TipsRates,
+    A_ZcbsRates,
     A_SimObs,
     A_NGDP,
     A_NomsFV,
@@ -994,6 +1020,8 @@ def MakeDbtPaths1(
     A_TipsFVmax, 
     A_TipsFVmaxOLD, 
     A_FrnsFV,
+    A_ZcbsPV,
+    A_ZcbsInt,
     A_IRCost, 
     A_TipsFVCost, 
     A_DbtSvc,
@@ -1045,26 +1073,30 @@ def MakeDbtPaths1(
     A_NomsFV[:,:]    = xp.reshape(Init_DbtFVout[:,0],(-1,1))                      # Initial profile of Nominal debt outstanding face values
     A_TipsFV[:,:]    = xp.reshape(Init_DbtFVout[:,1],(-1,1))                      # Initial profile of TIPS debt outstanding face values, NOT INFLATION ADJUSTED
     A_TipsFVadj[:,:] = xp.reshape(Init_TipsFVadj    ,(-1,1))                      # Initial profile of TIPS debt outstanding face values, CPI INFLATION ADJUSTED
-    A_FrnsFV[:,:]    = xp.reshape(Init_FrnsFV       ,(-1,1))                      # Initial profile of FRNs debt outstanding face values    
+    A_FrnsFV[:,:]    = xp.reshape(Init_FrnsFV       ,(-1,1))                      # Initial profile of FRNs debt outstanding face values   
+    A_ZcbsPV[:,:]    = 0                                                          # Initial profile of ZCBs debt outstanding present values at times of emission.  
     A_TotCoup[:,0,:] = xp.reshape(Init_DbtFVout[:,0]*xp.nan_to_num(Init_AvgCoupRate[:,0])/400,(-1,1)) # Initial value of coupons on Nominal securities
     A_TotCoup[:,1,:] = xp.reshape(Init_TipsFVadj    *xp.nan_to_num(Init_AvgCoupRate[:,1])/400,(-1,1)) # Initial value of INFLATION ADJUSTED coupons on TIPS securities
+    A_ZcbsInt[:,:]    = 0 #Initial Value of future interest payments to be made due to repayment of ZCBs.
     PriDeficit = - (A_SimObs[:, 6, :] / 400) * A_NGDP
     CPIInfl = xp.expand_dims(1 + A_SimObs[:, 3, :] / 400, 0)
-    Index = xp.copy(A_IRCost); Index[0,:] = 1; BaseDebt = xp.sum(A_NomsFV[1:,:] + A_TipsFVmax[1:,:] + A_FrnsFV[1:,:], axis=0)
+    Index = xp.copy(A_IRCost); Index[0,:] = 1; BaseDebt = xp.sum(A_NomsFV[1:,:] + A_TipsFVmax[1:,:] + A_FrnsFV[1:,:] + A_ZcbsPV[1:,:], axis=0)
     A_NomsSupEf *= 0 # Make sure initial period supply effect is zero. 
     for t in trange(0,n_period, disable=False if verbose else True):
         A_TotCoup   = xp.roll(A_TotCoup  , -1, axis=0); A_TotCoup[-1,:,:] = 0   
-        A_NomsFV    = xp.roll(A_NomsFV   , -1, axis=0); A_NomsFV[-1,:]    = 0        # Update current profile of debt FV before new issuance to be old debt shifted one tenor.  
+        A_NomsFV    = xp.roll(A_NomsFV   , -1, axis=0); A_NomsFV[-1,:]    = 0        # Set current profile of debt FV before new issuance to be old debt shifted one tenor.  
         A_TipsFV    = xp.roll(A_TipsFV   , -1, axis=0); A_TipsFV[-1,:]    = 0     
         A_TipsFVadj = xp.roll(A_TipsFVadj, -1, axis=0); A_TipsFVadj[-1,:] = 0 
         A_FrnsFV    = xp.roll(A_FrnsFV   , -1, axis=0); A_FrnsFV[-1,:]    = 0   
+        A_ZcbsPV    = xp.roll(A_ZcbsPV   , -1, axis=0); A_ZcbsPV[-1,:]    = 0 
+        A_ZcbsInt   = xp.roll(A_ZcbsInt  , -1, axis=0); A_ZcbsInt[-1,:]   = 0 
         A_TotCoup[:,1,:]*= CPIInfl[:,t,:]                                        # Coupons of TIPS are inflation adjusted. Update with current inflation
         A_TipsFVmaxOLD   = xp.maximum(A_TipsFV,A_TipsFVadj)                         # Keep a copy before updating TIPS adjusted face value by new inflation adjustment
         A_TipsFVadj     *= CPIInfl[:,t,:]                                           # Update adjusted FV by inflation
         A_TipsFVmax      = xp.maximum(A_TipsFV,A_TipsFVadj)                            # This is the FV effectively coming due.
         xp.sum(A_TipsFVmax  - A_TipsFVmaxOLD, axis=0, out=A_TipsFVCost[t, :])         # Keep track of inflation of maximum between face value and adjusted face value as an interest cost. 
-        A_IRCost[t,:] = QuartersperCoup * xp.sum(A_TotCoup[:-1:QuartersperCoup,:,:], axis=(0,1)) + xp.sum(A_FrnsFV[:MaxFrnsTen+1,:]*A_FrnsRates_view[t,:,:]/400, axis=0) # Coupon Cost is sums coupons generated by all future (even or odd) tenors of last period, both coupons from nominal securities and adjusted coupons from TIPS.  
-        A_DbtSvc[t,:] = A_IRCost[t,:] + A_NomsFV[0,:] + A_TipsFVmax[0,:] + A_FrnsFV[0,:]       # Debt service is coupon expense plus FV rolled, i.e. FV that was scheduled last periods to be due next period
+        A_IRCost[t,:] = QuartersperCoup * xp.sum(A_TotCoup[:-1:QuartersperCoup,:,:], axis=(0,1)) + xp.sum(A_FrnsFV[:MaxFrnsTen+1,:]*A_FrnsRates_view[t,:,:]/400, axis=0) + A_ZcbsInt[0,:] # Coupon Cost sums coupons generated by all future (even or odd) tenors of last period, both coupons from nominal securities and adjusted coupons from TIPS, plus interest on FRNs and ZCBs. 
+        A_DbtSvc[t,:] = A_IRCost[t,:] + A_NomsFV[0,:] + A_TipsFVmax[0,:] + A_FrnsFV[0,:] + A_ZcbsPV[0,:]       # Debt service is coupon expense plus FV coming due, i.e. FV that was scheduled last periods to be due next period. For ZCBs, its PV plus interest cost (in the "Coupon" array)
         A_TotDfc[t,:] = PriDeficit[t,:] + A_DbtSvc[t,:]                                        # Total deficit to be financed with PV debt is Debt Sevice + Primary Deficit = Coupon Interest Expense + Maturing Face value + Primary Deficit
         if Dynamic == False:  
             NewIssuance =       IssuanceStrat[t,:,:] * xp.expand_dims(A_TotDfc[t,:], axis=0)       # Deficit to be financed with issuance is split across tenors according to issuance strategy   
@@ -1076,17 +1108,19 @@ def MakeDbtPaths1(
         A_TipsFV[TipsTenors,:]    +=  NewIssuance[TipsPos,:]  
         A_TipsFVadj[TipsTenors,:] +=  NewIssuance[TipsPos,:]  
         A_FrnsFV[FrnsTenors,:]    +=  NewIssuance[FrnsPos,:]  
-        A_TotCoup[NomsTenors,0,:] +=  (NewIssuance[NomsPos,:]*(A_NomsRates_view[t,:,:]+A_NomsSupEf_view)/400)        
-        A_TotCoup[TipsTenors,1,:] +=  (NewIssuance[TipsPos,:]*(A_TipsRates_view[t,:,:]+A_TipsSupEf_view)/400)        # Add new TIPS issuance x TIPS coupon rate to TIPS INFATION ADJUSTED coupons.
-        Avg_IssRate[t] = xp.mean(xp.sum((A_NomsRates_view[t,:,:] + A_NomsSupEf_view)* IssuanceStrat[t,NomsPos,:], axis=0) + xp.sum((A_TipsRates_view[t,:,:]+ A_TipsSupEf_view)* IssuanceStrat[t,TipsPos,:], axis=0)  + xp.sum(A_FrnsRates_view[t,FrnsTenors,:] * IssuanceStrat[t,FrnsPos,:], axis=0) )
-        Store_Pvals  =  A_NomsFV[1:,:] + A_TipsFVmax[1:,:] + A_FrnsFV[1:,:]
+        A_ZcbsPV[ZcbsTenors,:]    +=  NewIssuance[ZcbsPos,:] 
+        A_TotCoup[NomsTenors,0,:] +=  NewIssuance[NomsPos,:]*((A_NomsRates_view[t,:,:]+A_NomsSupEf_view)/400)        
+        A_TotCoup[TipsTenors,1,:] +=  NewIssuance[TipsPos,:]*((A_TipsRates_view[t,:,:]+A_TipsSupEf_view)/400)        # Add new TIPS issuance x TIPS coupon rate to TIPS INFATION ADJUSTED coupons.
+        A_ZcbsInt[ZcbsTenors,:]   +=  NewIssuance[ZcbsPos,:]*(A_ZcbsCompRt_view[t,:,:]+A_ZcbsSupEf_view)#Views are already appropriately sliced shapes, and already /100. Supply effects assumed to be same as for par rates. Summing compounded rates is an approximation. 
+        Avg_IssRate[t] = xp.mean(xp.sum((A_NomsRates_view[t,:,:] + A_NomsSupEf_view)* IssuanceStrat[t,NomsPos,:], axis=0) + xp.sum((A_TipsRates_view[t,:,:]+ A_TipsSupEf_view)* IssuanceStrat[t,TipsPos,:], axis=0)  + xp.sum(A_FrnsRates_view[t,FrnsTenors,:] * IssuanceStrat[t,FrnsPos,:], axis=0) + xp.sum((A_ZcbsRates_view[t,:,:] +A_ZcbsSupEf_view)*IssuanceStrat[t,ZcbsPos,:], axis=0) )
+        Store_Pvals  =  A_NomsFV[1:,:] + A_TipsFVmax[1:,:] + A_FrnsFV[1:,:] + A_ZcbsPV[1:,:]
         TotDebt[t,:] = xp.sum(Store_Pvals, axis=0)
         if TrackTYEDebt == True:
-            #TYE_ratios = xp.squeeze(F_Conversion_TYE(xp.expand_dims(A_NomsRates[t,:,:]+A_NomsSupEf, axis=0))[0] )
             TYE_ratio_Noms, Nom_10yDur = F_Conversion_TYE(xp.expand_dims(A_NomsRates[t,:,:]+A_NomsSupEf, axis=0))
             TYE_ratio_Tips, Tip_10yDur = F_Conversion_TYE(xp.expand_dims(A_TipsRates[t,:,:]+A_NomsSupEf[:A_TipsRates.shape[1],:], axis=0))
             DebtTYE[t,:] =  xp.sum(A_NomsFV * xp.squeeze(TYE_ratio_Noms), axis=0)
             DebtTYE[t,:] += xp.sum(A_TipsFVmax[:A_TipsRates.shape[1],:] * xp.squeeze((TYE_ratio_Tips*Tip_10yDur)/Nom_10yDur), axis=0)
+            DebtTYE[t,:] += xp.sum(A_ZcbsPV * xp.squeeze(TYE_ratio_Noms), axis=0)
             if SupplyEffects == True: 
                 A_NomsSupEf = 0.06 * xp.squeeze(TYE_ratio_Noms) * xp.expand_dims(100*(DebtTYE[t,:]/A_NGDP[t,:] - baselineDebtTYE_GDP[t,:]), axis=0)
                 A_TipsSupEf = 0.06 * xp.squeeze((TYE_ratio_Tips*Tip_10yDur)/Nom_10yDur) * xp.expand_dims(100*(DebtTYE[t,:]/A_NGDP[t,:] - baselineDebtTYE_GDP[t,:]), axis=0)
@@ -1094,6 +1128,9 @@ def MakeDbtPaths1(
                 A_TipsSupEf = xp.maximum(A_TipsSupEf, -A_TipsRates[min(t+1, n_period-1),:,:]+ELB+1) # No supply effect pushing Tips rates to below ELB - 1%...
                 A_NomsSupEf_view = A_NomsSupEf[NomsTenors,:] 
                 A_TipsSupEf_view = A_TipsSupEf[TipsTenors,:] 
+                A_ZcbsSupEf = (A_NomsSupEf[0:5,:]/400)*xp.reshape(xp.array([0, 1, 2, 3, 4]),(-1,1)) #Use supply effects on nominal par rates as if applying to zero rates up to 4q...
+                A_ZcbsSupEf = xp.maximum(A_ZcbsSupEf, -A_ZcbsRates[min(t+1, n_period-1),:,:]+ELB)
+                A_ZcbsSupEf_view = A_ZcbsSupEf[ZcbsTenors,:]
         if ((Dynamic == True) and (t < n_period-1)): 
             Index[t+1,:] = xp.sqrt(TotDebt[t,:] / BaseDebt)   #Debt stock growth index to inflate the issuence amount with Kernels other than Baseline in Dynamic strategies. 
         if TrackWAM == True:
@@ -1157,7 +1194,7 @@ def Performance(
         DebtStorages['A_IRCost'] /= A_NGDP
         DebtStorages['A_IRCost'] *= 400
         Axis = 1  # Select 1 to compute statistics across simulations for a fixed period, then average across periods. Select 0 to do the converse: compute stats across periods for a fixed simulation, then average across simulations.
-        Startperiod = 79  # Starting period for statistics window. Select a number from 1 to 79 (or -1)
+        Startperiod = 75  # Starting period for statistics window. Select a number from 1 to 79 (or -1)
         Avg_IssRate[i] = xp.mean(DebtStorages['Avg_IssRate'][Startperiod:])
         Avg_IRCost[i] = xp.mean(xp.mean(DebtStorages['A_IRCost'][Startperiod:,:], axis= Axis ))
         Std_IRCost[i] = xp.mean(xp.std( DebtStorages['A_IRCost'][Startperiod:,:], axis= Axis )) # xp.mean(xp.std( A_IRCost[1:,:], axis=0 ))
