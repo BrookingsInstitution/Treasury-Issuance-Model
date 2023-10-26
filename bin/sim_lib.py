@@ -1194,7 +1194,7 @@ def Performance(
         DebtStorages['A_IRCost'] /= A_NGDP
         DebtStorages['A_IRCost'] *= 400
         Axis = 1  # Select 1 to compute statistics across simulations for a fixed period, then average across periods. Select 0 to do the converse: compute stats across periods for a fixed simulation, then average across simulations.
-        Startperiod = 75  # Starting period for statistics window. Select a number from 1 to 79 (or -1)
+        Startperiod = -4  # Starting period for statistics window. Select a number from 1 to 79 (or -1)
         Avg_IssRate[i] = xp.mean(DebtStorages['Avg_IssRate'][Startperiod:])
         Avg_IRCost[i] = xp.mean(xp.mean(DebtStorages['A_IRCost'][Startperiod:,:], axis= Axis ))
         Std_IRCost[i] = xp.mean(xp.std( DebtStorages['A_IRCost'][Startperiod:,:], axis= Axis )) # xp.mean(xp.std( A_IRCost[1:,:], axis=0 ))
