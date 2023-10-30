@@ -66,29 +66,16 @@ def F_InitStates(D_Setup):
         V_StaSrt, Init_GDP = np.array([-0.5,1.5,-1,1.8, 2   ,-0.5,1.5,-1,1.8 ,2   ,0,0,-0.25,0]), 19882
     else:
         import datetime as dtm
-        startyear, startquarter = D_Setup["start_year"], D_Setup["start_quarter"]
-        startdate = dtm.datetime(
-            startyear,
-            int(startquarter*3),
-            30+1*(startquarter==1 or startquarter==4)
-        )
         from pandas_datareader.data import DataReader
         Q_series = ['NROU',                    # Natural Rate of Unemployment (Long-Term), Percent, Not Seasonally Adjusted
-                    'DPCCRV1Q225SBEA',         # Personal Consumption Expenditures (PCE) Excluding Food and Energy (chain-type price index), Percent Change from Preceding Period, Seasonally Adjusted Annual Rate
+                    'DPCCRV1Q225SBEA',         # PCE Exc.Food and Energy (chain-type price index), % Change from Preceding Period, saar
                     'GDP',                     # Gross Domestic Product, Billions of Dollars, Seasonally Adjusted Annual Rate
                     'UNRATE',                  # Unemployment Rate, Percent, Seasonally Adjusted
                     'FEDFUNDS'                 # Effective Federal Funds Rate, Percent, Not Seasonally Adjusted
                     ]
-        Q_data = DataReader(Q_series, 'fred',startdate-dtm.timedelta(3*31), startdate) # Download data (start looking from start-of-quarter)
-        startdate= str(int(startyear)) +'-'+ ('0' + str(int(startquarter*3)))[-2:] +'-'+ str(30+1*(startquarter==1 or startquarter==4))
-        Q_data = Q_data.fillna(method='ffill').resample('Q').ffill() # Adjust dates convention: from Quarterly (or monthly) start-of-period to quarterly end-of-period
-        Q_data = Q_data.loc[startdate]
-        Init_GDP = int(Q_data['GDP']) # Nominal GDP, in current Billon USD
-        V_StaSrt = np.zeros(14)
-        V_StaSrt[[0,5]] = np.round(Q_data['UNRATE']-Q_data['NROU'],2) # Set initial UGAP.
-        V_StaSrt[[3,8]] = Q_data['DPCCRV1Q225SBEA']                   # Set initial PCE Inflation.
-        V_StaSrt[[4,9]] = Q_data['FEDFUNDS']                          # Set initial Fed Funds Rate
-        # Set initial Rstar from Laubach-Williams.
+        
+        
+        # Download or read Laubach-Williams Dataset
         try:    # If LW dataset already downloaded in current folder, just read it
             LW = pd.read_csv('../data/LW.csv', index_col=0, parse_dates=True)
         except: # Otherwise download it and also save a copy to csv for future use (NOTE: may need updating for recent data)
@@ -96,12 +83,36 @@ def F_InitStates(D_Setup):
             LW = pd.read_excel(url_LW, 'data', index_col=0, parse_dates=True, header=5) # Download data
             LW  = LW.resample('Q').ffill()  # Resample dates to Quarterly end-of-period
             LW.to_csv('../data/LW.csv', index = True)
-        Rstar = LW.loc[startdate,'rstar']     # Notice LW rstar = c g + z , with g potential growth, c a constant, and z autoregressive with mean zero. Belton et al has Rstar=Gstate+Zstate, with G potential growth and Zstate AR(1) with mean -0.5
-        Gstate =LW.loc[startdate,'g']         # Take only potential growth g, not  c x g (c is the constant of Laubach Williams)
-        Zstate =   Rstar - Gstate             # We define Z = r* - g , while LW have z = r* - cg, and z has mean zero, while Belton et al Z has mean Zss=0.5
-        V_StaSrt[[1,6]] = Gstate                          # Set initial G Random Walk
-        V_StaSrt[[2,7]] = Zstate                          # Set initial Z Autoregressive Process (Z has mean -0.5)
-        V_StaSrt[[10,11]] = 0                             # Set initial EpsPRI and EpsCPI to zero. (Refinement may want to set EpsCPI to hit initial CPI)
+        
+        V_StaSrt = np.zeros(14)
+        for lag in [1,0]:
+            if lag == 0:
+                startquarter = D_Setup["start_quarter"]
+                startyear    = D_Setup["start_year"]
+            elif lag == 1:
+                startquarter = (D_Setup["start_quarter"]-1)*(D_Setup["start_quarter"]>1) + 4*(D_Setup["start_quarter"]==1)
+                startyear    = D_Setup["start_year"] - (D_Setup["start_quarter"]==1)      
+            startdate = dtm.datetime(
+                startyear,
+                int(startquarter*3),
+                30+1*(startquarter==1 or startquarter==4)
+            )  #End of Quarter
+            print("Start date, lag" + str(lag) +": " + str(startdate))
+            Q_data = DataReader(Q_series, 'fred',startdate-dtm.timedelta(3*31), startdate) # Download (start looking from start-of-quarter)
+            startdate= str(int(startyear)) +'-'+ ('0' + str(int(startquarter*3)))[-2:] +'-'+ str(30+1*(startquarter==1 or startquarter==4))
+            Q_data = Q_data.fillna(method='ffill').resample('Q').ffill() # Adjust dates convention: from Quarterly (or monthly) start-of-period to quarterly end-of-period
+            Q_data = Q_data.loc[startdate]
+            V_StaSrt[[0+lag*5]] = np.round(Q_data['UNRATE']-Q_data['NROU'],2) # Set initial UGAP.
+            V_StaSrt[[3+lag*5]] = Q_data['DPCCRV1Q225SBEA']                   # Set initial PCE Inflation.
+            V_StaSrt[[4+lag*5]] = Q_data['FEDFUNDS']                          # Set initial Fed Funds Rate
+            Rstar = LW.loc[startdate,'rstar']     # Notice LW rstar = c g + z , with g pot. growth, c constant, and z AR(1) with mean zero. Belton et al has Rstar=Gstate+Zstate, with G pot. growth and Zstate AR(1) with mean -0.5
+            Gstate =LW.loc[startdate,'g']         # Take only potential growth g, not  c x g (c is the constant of Laubach Williams)
+            Zstate =   Rstar - Gstate             # We define Z = r* - g , while LW have z = r* - cg, and z has mean zero, while Belton et al Z has mean Zss=0.5
+            V_StaSrt[[1+lag*5]] = Gstate                          # Set initial G Random Walk
+            V_StaSrt[[2+lag*5]] = Zstate                          # Set initial Z Autoregressive Process (Z has mean -0.5)
+        V_StaSrt[[10,11]] = 0          # Set initial EpsPRI and EpsCPI to zero. (Refinement may want to set EpsCPI to hit initial CPI)
+        Init_GDP = int(Q_data['GDP']) # Nominal GDP, in current Billon USD
+        
         # Set initial EpsTP10, EpsTP2 to match initial TP10, TP2 from ACM.
         try:    # If ACM dataset already downloaded in current folder, just read it
             ACM = pd.read_csv('../data/ACM.csv', index_col=0, parse_dates=True)
